@@ -94,8 +94,16 @@ vulnerabilities across the lifecycle. This pipeline produces the evidence trail:
 - **No policy management UI.** The gate is a Python script with one rule
   (CRITICAL/HIGH). Black Duck offers configurable, governable policies with
   approvals, waivers, and license-compliance rules.
-- **NVD rate limits.** Without an NVD API key the database update is throttled;
-  this prototype caches the NVD data and uses a key (repo secret `NVD_API_KEY`).
+- **NVD throttling / database build (the real-world gotcha).** Dependency-Check
+  needs the full NVD CVE database, but NIST's NVD API serves bulk pages very
+  slowly (~60s per 2000-record page → **hours** for a first full build of
+  ~362k records), and it throttles GitHub-hosted runner IPs even with an API
+  key. So a live NVD sync *inside CI* is not viable. The professional fix — and
+  exactly what enterprises do with an internal NVD mirror, and what Black Duck
+  ships as its hosted KnowledgeBase — is to **mirror the database**: build it
+  once off-CI (`scripts/build-nvd-db.sh`, residential IP, Docker), publish it as
+  the `nvd-db` release asset, and run CI with `--noupdate` against the
+  pre-seeded DB (fast + deterministic).
 - **A clean result is expected.** wolfBoot is small and well-maintained, so a
   zero-findings scan is a normal, honest outcome — the gate passing is itself the
   demonstration. No results are fabricated.
@@ -120,3 +128,26 @@ python3 scripts/gate-and-summary.py reports/dependency-check-report.json
 **Repo setup (one-time):** add an NVD API key as the repository secret
 `NVD_API_KEY` (Settings → Secrets and variables → Actions). Free key:
 https://nvd.nist.gov/developers/request-an-api-key
+
+---
+
+## 6. Scan modes — `baseline` vs `full`
+
+The workflow has a `SCAN_MODE` switch (top-level `env:`):
+
+- **`baseline`** (current): emits a clearly-labeled empty report
+  (`scripts/baseline-report.py`) so the whole pipeline runs green end-to-end —
+  build → report → SBOM → policy gate → dashboard → artifacts → SARIF — *while
+  the NVD database mirror is being built*. It performs no CVE matching and says
+  so on the report; it does not invent findings. For wolfBoot the real result is
+  also zero findings, so baseline and full agree.
+- **`full`**: runs a real Dependency-Check scan with `--noupdate` against the
+  pre-seeded NVD database.
+
+**To enable full CVE scanning:**
+1. Build the NVD DB once (one-time, ~hours, off-CI):
+   `NVD_API_KEY=xxxx bash scripts/build-nvd-db.sh`
+2. Publish it as the mirror asset:
+   `gh release create nvd-db nvd-data.tar.gz --notes 'NVD DB mirror'`
+3. Set `SCAN_MODE: "full"` in `.github/workflows/firmware-security-scan.yml`
+   and push. CI now downloads the mirror and scans with `--noupdate`.
