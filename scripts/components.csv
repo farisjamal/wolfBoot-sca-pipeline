@@ -1,0 +1,22 @@
+# wolfBoot firmware component inventory  (manually audited dependency surface)
+# -----------------------------------------------------------------------------
+# WHY THIS FILE EXISTS:
+#   wolfBoot is C with no package manager, and OWASP Dependency-Check cannot do
+#   the signature-based component identification that Black Duck's KnowledgeBase
+#   does. So the vendored crypto libraries (git submodules) are tracked by hand
+#   here. This is the authoritative component list that feeds the CycloneDX SBOM
+#   (generate-sbom.py) and the dashboard's "SBOM summary".
+#
+#   In a real Black Duck pipeline this list would be produced automatically by
+#   Detect's signature + binary scanning. Here it is the honest manual analogue.
+#
+# Pinned commits were read from `git submodule status` of wolfBoot v2.8.0.
+# Columns: name,version,type,supplier,purl,vcs_url,pinned_commit,notes
+name,version,type,supplier,purl,vcs_url,pinned_commit,notes
+wolfBoot,2.8.0,application,wolfSSL Inc.,pkg:github/wolfSSL/wolfBoot@v2.8.0,https://github.com/wolfSSL/wolfBoot,v2.8.0,Secure bootloader (root firmware project under analysis)
+wolfSSL/wolfCrypt,submodule-pinned,library,wolfSSL Inc.,pkg:github/wolfSSL/wolfssl@887f242ee8570f7d8403e002c5b2b88929b86544,https://github.com/wolfSSL/wolfssl,887f242ee8570f7d8403e002c5b2b88929b86544,Crypto + TLS library; wolfCrypt provides firmware signing/verification (ECDSA/RSA/ED25519/SHA)
+wolfTPM,submodule-pinned,library,wolfSSL Inc.,pkg:github/wolfSSL/wolfTPM@c8d51e969301859b16fd62fdaf2011a23546d8f2,https://github.com/wolfSSL/wolfTPM,c8d51e969301859b16fd62fdaf2011a23546d8f2,TPM 2.0 stack (measured boot / sealed keys)
+wolfPKCS11,submodule-pinned,library,wolfSSL Inc.,pkg:github/wolfSSL/wolfPKCS11@8fec69592d99bf4d8f01e36acd16f7d27b4639f4,https://github.com/wolfSSL/wolfPKCS11,8fec69592d99bf4d8f01e36acd16f7d27b4639f4,PKCS#11 provider (key storage abstraction)
+wolfHSM,submodule-pinned,library,wolfSSL Inc.,pkg:github/wolfSSL/wolfHSM@7c6359e7f82670727dd783304f7cdfe1b964feb2,https://github.com/wolfSSL/wolfHSM,7c6359e7f82670727dd783304f7cdfe1b964feb2,Hardware security module client/server framework
+wolfPSA,submodule-pinned,library,wolfSSL Inc.,pkg:github/wolfSSL/wolfPSA@f289a6f12788237224f26635f8586b1f63c817e4,https://github.com/wolfSSL/wolfPSA,f289a6f12788237224f26635f8586b1f63c817e4,PSA Crypto API integration
+wolfHAL,submodule-pinned,library,wolfSSL Inc.,pkg:github/wolfSSL/wolfHAL@2bc2938b0bbcc977177153a7f38393710702bf70,https://github.com/wolfSSL/wolfHAL,2bc2938b0bbcc977177153a7f38393710702bf70,Hardware abstraction layer for ports

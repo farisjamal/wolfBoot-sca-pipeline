@@ -1,0 +1,138 @@
+# =============================================================================
+# Firmware SCA Security Pipeline  (Black Duck-pattern demo on wolfBoot)
+# -----------------------------------------------------------------------------
+# WHAT THIS IS:
+#   A free, open-source re-creation of the kind of "SCA gate in the firmware
+#   autobuild" that Black Duck (Synopsys/Black Duck) + Polaris provide in an
+#   enterprise pipeline. We use OWASP Dependency-Check instead of Black Duck
+#   Detect, but the *architecture* is identical:
+#       checkout -> build -> SCA scan -> policy gate -> publish report.
+#
+# MAP TO ENTERPRISE TOOLING (say this out loud in the interview):
+#   - "Run SCA scan" step      == Black Duck Detect (detect.jar) invocation
+#   - "Policy gate" step        == Black Duck policy rule "fail on CRITICAL/HIGH"
+#   - CycloneDX SBOM step       == Black Duck BDIO / SBOM export
+#   - Upload artifact + summary == Black Duck project dashboard / risk report
+#
+# TRIGGERS: push + PR to main/master, and manual dispatch.
+# =============================================================================
+name: Firmware Security Scan (SCA)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:        # lets you run it on-demand from the Actions tab
+
+# Least-privilege token. security-events:write is only needed so we can upload
+# the SARIF result into the GitHub "Security" tab (code scanning alerts).
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  DC_VERSION: "12.2.2"          # pinned OWASP Dependency-Check release
+  GATE_SEVERITIES: "CRITICAL,HIGH"   # policy gate: build fails if any of these are found
+
+jobs:
+  sca-scan:
+    runs-on: ubuntu-latest
+    steps:
+      # -- Step 1: get the firmware source ------------------------------------
+      # submodules:false on purpose. wolfBoot's crypto deps (wolfSSL, wolfTPM,
+      # wolfPKCS11, wolfHSM, wolfPSA, wolfHAL) are git submodules. We track them
+      # as an explicit component inventory in scripts/components.csv (this is the
+      # manual stand-in for Black Duck's KnowledgeBase signature matching, which
+      # Dependency-Check cannot do for C/C++). Keeping submodules out keeps CI fast.
+      - name: Checkout firmware source
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # -- Step 2a: Java runtime ---------------------------------------------
+      # Dependency-Check is a Java tool and needs a JRE/JDK 11+.
+      - name: Set up Java (Dependency-Check runtime)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # -- Step 2b: minimal build (informational, NON-gating) ----------------
+      # The job description says "build, or a minimal subset if a full build is
+      # too heavy". A full wolfBoot image needs a cross-compiler + a board
+      # .config, which is out of scope for a quick SCA demo. Instead we build the
+      # host-side key tools (pure host C) just to prove the tree compiles.
+      # continue-on-error: this must never block the security scan.
+      - name: Build host key tools (informational, non-gating)
+        continue-on-error: true
+        run: |
+          echo "Attempting lightweight host build of wolfBoot key tools..."
+          make keytools 2>&1 | tail -30 || echo "keytools build skipped/failed (non-gating, OK for SCA demo)"
+
+      # -- Step 3a: cache the NVD database -----------------------------------
+      # The National Vulnerability Database is large. Caching it means only the
+      # first run pays the download cost; later runs are fast. This mirrors how
+      # Black Duck keeps a warm KnowledgeBase.
+      - name: Cache NVD data
+        uses: actions/cache@v4
+        with:
+          path: ~/.dependency-check/data
+          key: dc-nvd-${{ env.DC_VERSION }}-${{ github.run_id }}
+          restore-keys: |
+            dc-nvd-${{ env.DC_VERSION }}-
+
+      # -- Step 3b: install Dependency-Check CLI -----------------------------
+      # We install the CLI directly (instead of the marketplace action) so we
+      # control every flag - the marketplace action hardcodes --noupdate, which
+      # would stop the NVD feed from ever updating.
+      - name: Install OWASP Dependency-Check ${{ env.DC_VERSION }}
+        run: |
+          curl -sSL -o dc.zip \
+            "https://github.com/dependency-check/DependencyCheck/releases/download/v${DC_VERSION}/dependency-check-${DC_VERSION}-release.zip"
+          mkdir -p "$HOME/dc-tool"
+          unzip -q dc.zip -d "$HOME/dc-tool"
+          echo "$HOME/dc-tool/dependency-check/bin" >> "$GITHUB_PATH"
+
+      # -- Step 3c: run the SCA scan -----------------------------------------
+      # The scan logic lives in scripts/run-sca-scan.sh so the exact same scan
+      # can be run locally (via Docker) without GitHub. NVD_API_KEY comes from a
+      # repo secret; without it the NVD update is heavily rate-limited.
+      - name: Run SCA scan (Dependency-Check)
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: bash scripts/run-sca-scan.sh .
+
+      # -- Step 3d: generate the CycloneDX SBOM ------------------------------
+      # Dependency-Check does NOT emit CycloneDX (its formats are HTML/XML/CSV/
+      # JSON/SARIF/JUNIT/JENKINS/GITLAB only). So we build a CycloneDX 1.5 SBOM
+      # from the audited component inventory. This is the EUCRA Annex I "SBOM"
+      # evidence artifact and the analogue of Black Duck's BDIO/SBOM export.
+      - name: Generate CycloneDX SBOM
+        run: python3 scripts/generate-sbom.py scripts/components.csv reports/sbom.cyclonedx.json
+
+      # -- Step 4: POLICY GATE + job summary ---------------------------------
+      # This is the Black Duck "policy rule" equivalent: parse the findings and
+      # FAIL the build if any CRITICAL/HIGH CVE is present. Also writes a severity
+      # table + top CVEs to the GitHub Actions job summary.
+      - name: Policy gate + job summary
+        run: python3 scripts/gate-and-summary.py reports/dependency-check-report.json
+
+      # -- Step 5: publish reports as a build artifact -----------------------
+      # if: always() so we still keep the evidence even when the gate fails the build.
+      - name: Upload scan reports + SBOM + dashboard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-sca-reports
+          path: |
+            reports/
+            dashboard/index.html
+
+      # -- Step 6: push SARIF into the Security tab (code scanning) -----------
+      # Optional but professional: surfaces findings as native GitHub alerts.
+      - name: Upload SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/dependency-check-report.sarif

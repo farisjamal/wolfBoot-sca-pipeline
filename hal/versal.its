@@ -1,0 +1,69 @@
+/dts-v1/;
+
+/ {
+    description = "Xilinx Versal VMK180 - wolfBoot Linux";
+    #address-cells = <1>;
+
+    images {
+        kernel-1 {
+            description = "Linux Kernel";
+            data = /incbin/("../Image");
+            type = "kernel";
+            arch = "arm64";
+            os = "linux";
+            compression = "none";
+            load = <0x00200000>;
+            entry = <0x00200000>;
+            hash-1 {
+                algo = "sha256";
+            };
+        };
+        fdt-1 {
+            description = "Flattened Device Tree blob";
+            data = /incbin/("../system-default.dtb");
+            type = "flat_dt";
+            arch = "arm64";
+            compression = "none";
+            load = <0x00001000>;
+            hash-1 {
+                algo = "sha256";
+            };
+        };
+        /* FPGA bitstream sub-image (requires FPGA_BITSTREAM=1). Add the
+         * "fpga = ..." reference to the configuration node below. The
+         * bitstream must be a bootgen .bin staged to its load address.
+         * NOTE: Versal PL config is a PDI loaded by the PLM (XilLoader
+         * Load-PDI IPI) - the wolfBoot Versal hal_fpga_load is currently
+         * a stub, so leave this disabled on Versal. On ZynqMP/Zynq-7000
+         * this is the working convention.
+         *
+         * As emitted by mkimage the fpga node is usually gzip-compressed
+         * and has no "load" property; set WOLFBOOT_LOAD_FPGA_ADDRESS to a
+         * DDR staging address and build with GZIP=1.
+         *
+         * fpga-1 {
+         *     description = "FPGA bitstream";
+         *     data = /incbin/("../system.bit.bin.gz");
+         *     type = "fpga";
+         *     arch = "arm64";
+         *     compression = "gzip";
+         *     compatible = "u-boot,fpga-legacy";
+         *     hash-1 {
+         *         algo = "sha256";
+         *     };
+         * };
+         */
+    };
+    configurations {
+        default = "conf1";
+        conf1 {
+            description = "Linux kernel and FDT blob";
+            kernel = "kernel-1";
+            fdt = "fdt-1";
+            /* fpga = "fpga-1"; */
+            hash-1 {
+                algo = "sha256";
+            };
+        };
+    };
+};

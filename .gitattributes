@@ -1,0 +1,4 @@
+# Force LF for scripts run on Linux CI runners (prevents CRLF breaking bash/python).
+*.sh  text eol=lf
+*.py  text eol=lf
+*.yml text eol=lf

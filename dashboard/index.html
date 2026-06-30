@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>wolfBoot Firmware SCA Dashboard</title>
+<!--
+  Static, single-file SCA dashboard (no backend, no build step).
+  Black Duck analogue: this is the project "risk report / dashboard" view.
+
+  It deliberately does NOT use fetch() so it works when opened directly from
+  disk (file://) without tripping CORS. Load reports two ways:
+    1. Drag the Dependency-Check JSON (and optionally the CycloneDX SBOM) onto
+       the drop zone, or use the file pickers.
+    2. With nothing loaded it renders a clean zero-findings sample so the layout
+       is always presentable for a screen-share.
+-->
+<style>
+  :root {
+    --bg: #0f1620; --panel: #18222e; --panel2: #1f2c3a; --line: #2c3a4b;
+    --text: #e6edf3; --muted: #9fb0c0; --accent: #4aa8ff;
+    --crit: #e5484d; --high: #f5a524; --med: #3b82f6; --low: #6b7280; --ok: #2ea043;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { padding: 20px 28px; border-bottom: 1px solid var(--line);
+           display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .badge { margin-left: auto; padding: 6px 12px; border-radius: 999px; font-size: 13px;
+           font-weight: 650; }
+  .badge.pass { background: rgba(46,160,67,.15); color: var(--ok); border: 1px solid var(--ok); }
+  .badge.fail { background: rgba(229,72,77,.15); color: var(--crit); border: 1px solid var(--crit); }
+  main { padding: 22px 28px; max-width: 1100px; margin: 0 auto; }
+  .loaders { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 22px; }
+  .drop { flex: 1; min-width: 280px; border: 1.5px dashed var(--line); border-radius: 12px;
+          padding: 16px; background: var(--panel); }
+  .drop.drag { border-color: var(--accent); background: var(--panel2); }
+  .drop h3 { margin: 0 0 6px; font-size: 14px; }
+  .drop p { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+  input[type=file] { font-size: 12px; color: var(--muted); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr));
+           gap: 14px; margin-bottom: 24px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          padding: 16px; }
+  .card .n { font-size: 30px; font-weight: 700; }
+  .card .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .card.crit .n { color: var(--crit); } .card.high .n { color: var(--high); }
+  .card.med .n { color: var(--med); } .card.low .n { color: var(--low); }
+  h2 { font-size: 15px; margin: 26px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  td.sev { font-weight: 700; }
+  .sev-CRITICAL { color: var(--crit); } .sev-HIGH { color: var(--high); }
+  .sev-MEDIUM { color: var(--med); } .sev-LOW { color: var(--low); }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+          background: var(--panel2); color: var(--muted); border: 1px solid var(--line); }
+  .empty { color: var(--muted); padding: 14px; background: var(--panel); border-radius: 10px;
+           border: 1px solid var(--line); }
+  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  footer { color: var(--muted); font-size: 12px; padding: 24px 28px; border-top: 1px solid var(--line);
+           margin-top: 30px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>wolfBoot &mdash; Firmware SCA Dashboard</h1>
+    <div class="sub">OWASP Dependency-Check &middot; Black Duck-pattern policy gate</div>
+  </div>
+  <span id="gateBadge" class="badge pass">GATE: PASS</span>
+</header>
+
+<main>
+  <div class="loaders">
+    <div class="drop" id="dropDC">
+      <h3>Scan report</h3>
+      <p>Drop <code>dependency-check-report.json</code> here, or pick it:</p>
+      <input type="file" id="fileDC" accept=".json" />
+    </div>
+    <div class="drop" id="dropSBOM">
+      <h3>SBOM (optional)</h3>
+      <p>Drop <code>sbom.cyclonedx.json</code> here, or pick it:</p>
+      <input type="file" id="fileSBOM" accept=".json" />
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="n" id="cComp">0</div><div class="l">Components scanned</div></div>
+    <div class="card crit"><div class="n" id="cCrit">0</div><div class="l">Critical</div></div>
+    <div class="card high"><div class="n" id="cHigh">0</div><div class="l">High</div></div>
+    <div class="card med"><div class="n" id="cMed">0</div><div class="l">Medium</div></div>
+    <div class="card low"><div class="n" id="cLow">0</div><div class="l">Low</div></div>
+  </div>
+
+  <h2>Findings</h2>
+  <div id="findingsWrap"></div>
+
+  <h2>SBOM summary</h2>
+  <div id="sbomWrap"></div>
+</main>
+
+<footer>
+  Prototype using free tooling. Enterprise equivalent: Black Duck Detect + policy
+  management + BDSA feed. C/C++ component identification here is best-effort
+  (manual inventory) &mdash; see <code>SECURITY-SCAN-NOTES.md</code>.
+</footer>
+
+<script>
+// ---- severity helpers (mirror gate-and-summary.py) ----
+const SEV_ORDER = ["CRITICAL","HIGH","MEDIUM","LOW","INFO","UNKNOWN"];
+function normSev(raw){
+  if(raw==null) return "UNKNOWN";
+  let s = String(raw).trim().toUpperCase();
+  if(s==="MODERATE") return "MEDIUM";
+  if(SEV_ORDER.includes(s)) return s;
+  const n = parseFloat(s);
+  if(!isNaN(n)){
+    if(n>=9) return "CRITICAL"; if(n>=7) return "HIGH";
+    if(n>=4) return "MEDIUM"; if(n>0) return "LOW"; return "INFO";
+  }
+  return "UNKNOWN";
+}
+function cvss(v){
+  if(v.cvssv3 && v.cvssv3.baseScore!=null) return v.cvssv3.baseScore;
+  if(v.cvssv2 && v.cvssv2.score!=null) return v.cvssv2.score;
+  return "";
+}
+
+function renderDC(report){
+  const deps = report.dependencies || [];
+  const counts = {CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0,UNKNOWN:0};
+  const findings = [];
+  deps.forEach(d=>{
+    (d.vulnerabilities||[]).forEach(v=>{
+      const sev = normSev(v.severity);
+      counts[sev]++;
+      findings.push({sev, cve:v.name||"?", comp:d.fileName||"unknown", score:cvss(v)});
+    });
+  });
+  document.getElementById("cComp").textContent = deps.length;
+  document.getElementById("cCrit").textContent = counts.CRITICAL;
+  document.getElementById("cHigh").textContent = counts.HIGH;
+  document.getElementById("cMed").textContent = counts.MEDIUM;
+  document.getElementById("cLow").textContent = counts.LOW;
+
+  const blocking = counts.CRITICAL + counts.HIGH;
+  const badge = document.getElementById("gateBadge");
+  if(blocking>0){ badge.className="badge fail"; badge.textContent=`GATE: FAIL (${blocking})`; }
+  else { badge.className="badge pass"; badge.textContent="GATE: PASS"; }
+
+  findings.sort((a,b)=> SEV_ORDER.indexOf(a.sev)-SEV_ORDER.indexOf(b.sev)
+                        || (parseFloat(b.score)||0)-(parseFloat(a.score)||0));
+
+  const wrap = document.getElementById("findingsWrap");
+  if(findings.length===0){
+    wrap.innerHTML = '<div class="empty">No known vulnerabilities reported. '
+      + 'For a small, well-maintained project this is a valid clean result.</div>';
+    return;
+  }
+  let html = '<table><thead><tr><th>Severity</th><th>CVE</th><th>Component</th><th>CVSS</th></tr></thead><tbody>';
+  findings.forEach(f=>{
+    html += `<tr><td class="sev sev-${f.sev}">${f.sev}</td><td>${f.cve}</td>`
+          + `<td>${f.comp}</td><td>${f.score}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function renderSBOM(bom){
+  const wrap = document.getElementById("sbomWrap");
+  const comps = bom.components || [];
+  const root = (bom.metadata && bom.metadata.component) || {};
+  let html = `<p class="pill">Subject: ${root.name||"?"} ${root.version||""}</p>`
+           + `<p class="pill">Spec: CycloneDX ${bom.specVersion||"?"}</p>`
+           + `<p class="pill">${comps.length} components</p>`;
+  html += '<table><thead><tr><th>Component</th><th>Version</th><th>Type</th><th>Supplier</th></tr></thead><tbody>';
+  [root, ...comps].forEach(c=>{
+    if(!c || !c.name) return;
+    const sup = (c.supplier && c.supplier.name) || "";
+    html += `<tr><td>${c.name}</td><td>${c.version||""}</td><td>${c.type||""}</td><td>${sup}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+// ---- file loading (FileReader, no fetch) ----
+function wireLoader(inputId, dropId, handler){
+  const input = document.getElementById(inputId);
+  const drop = document.getElementById(dropId);
+  const read = file => { const r=new FileReader();
+    r.onload = e => { try{ handler(JSON.parse(e.target.result)); }
+      catch(err){ alert("Could not parse JSON: "+err.message); } };
+    r.readAsText(file); };
+  input.addEventListener("change", e => { if(e.target.files[0]) read(e.target.files[0]); });
+  ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag");}));
+  ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag");}));
+  drop.addEventListener("drop", e => { if(e.dataTransfer.files[0]) read(e.dataTransfer.files[0]); });
+}
+wireLoader("fileDC","dropDC",renderDC);
+wireLoader("fileSBOM","dropSBOM",renderSBOM);
+
+// ---- embedded clean samples so the page renders immediately ----
+const SAMPLE_DC = { dependencies: [
+  {fileName:"wolfBoot/src", vulnerabilities:[]},
+  {fileName:"lib/wolfssl",  vulnerabilities:[]}
+]};
+const SAMPLE_SBOM = {
+  bomFormat:"CycloneDX", specVersion:"1.5",
+  metadata:{component:{type:"application", name:"wolfBoot", version:"2.8.0"}},
+  components:[
+    {type:"library", name:"wolfSSL/wolfCrypt", version:"submodule-pinned", supplier:{name:"wolfSSL Inc."}},
+    {type:"library", name:"wolfTPM", version:"submodule-pinned", supplier:{name:"wolfSSL Inc."}}
+  ]
+};
+renderDC(SAMPLE_DC);
+renderSBOM(SAMPLE_SBOM);
+</script>
+</body>
+</html>
