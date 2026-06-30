@@ -47,6 +47,30 @@ FORMATS=(--format HTML --format JSON --format SARIF)
 # Skip non-firmware paths: scan output, git metadata, the dashboard viewer.
 EXCLUDES=(--exclude "**/.git/**" --exclude "**/reports/**" --exclude "**/dashboard/**")
 
+# Disable analyzers that are IRRELEVANT to a C bootloader and that make blocking
+# network calls (Maven Central, Sonatype OSS Index, RetireJS feed, npm/yarn
+# audit). Those calls can hang for a very long time on a CI runner and add zero
+# value for C firmware. We keep ONLY the NVD CVE feed (the part that matters).
+# This is also why the scan is fast + deterministic.
+DISABLE_ANALYZERS=(
+  --disableOssIndex            # Sonatype OSS Index (network)
+  --disableCentral             # Maven Central (network)
+  --disableCentralCache
+  --disableRetireJs            # RetireJS signature download (network)
+  --disableNodeAudit           # npm audit (network)
+  --disableNodeJS
+  --disableYarnAudit
+  --disablePnpmAudit
+  --disableBundleAudit
+  --disableAssembly            # .NET
+  --disableMSBuild
+  --disableNuspec
+  --disableNugetconf
+)
+
+# NVD update resilience: a small delay + retries ride out transient NVD 503s.
+NVD_TUNING=(--nvdApiDelay 2000 --nvdMaxRetryCount 10)
+
 mkdir -p "$OUT_DIR"
 
 # Pass the NVD API key only if it is set, so the script also runs offline-ish.
@@ -72,6 +96,8 @@ if command -v dependency-check >/dev/null 2>&1; then
     --out "$OUT_DIR" \
     "${FORMATS[@]}" \
     "${EXCLUDES[@]}" \
+    "${DISABLE_ANALYZERS[@]}" \
+    "${NVD_TUNING[@]}" \
     "${NVD_ARG[@]}"
 else
   # ----- Local Docker fallback (no local Java needed) -----
@@ -87,6 +113,8 @@ else
     --out /report \
     "${FORMATS[@]}" \
     --exclude "**/.git/**" --exclude "**/reports/**" --exclude "**/dashboard/**" \
+    "${DISABLE_ANALYZERS[@]}" \
+    "${NVD_TUNING[@]}" \
     "${NVD_ARG[@]}"
 fi
 

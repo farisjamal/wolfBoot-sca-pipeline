@@ -38,6 +38,9 @@ env:
 jobs:
   sca-scan:
     runs-on: ubuntu-latest
+    # Hard cap: a healthy run is a few minutes (or ~10-15 on a cold NVD cache).
+    # If anything hangs, fail fast instead of burning CI minutes.
+    timeout-minutes: 30
     steps:
       # -- Step 1: get the firmware source ------------------------------------
       # submodules:false on purpose. wolfBoot's crypto deps (wolfSSL, wolfTPM,
