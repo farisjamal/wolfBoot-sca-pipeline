@@ -73,31 +73,69 @@ NVD_TUNING=(--nvdApiDelay 2000 --nvdMaxRetryCount 10)
 
 mkdir -p "$OUT_DIR"
 
-# Pass the NVD API key only if it is set, so the script also runs offline-ish.
+# --- SCAN_MODE -------------------------------------------------------------
+# baseline : emit a clearly-labeled empty report (NVD mirror not yet seeded) so
+#            the whole pipeline runs green end-to-end without inventing data.
+# full     : run a real Dependency-Check scan (requires a seeded NVD DB).
+SCAN_MODE="${SCAN_MODE:-full}"
+if [[ "$SCAN_MODE" == "baseline" ]]; then
+  echo "SCAN_MODE=baseline - emitting labeled baseline report (no NVD enrichment)."
+  PY="$(command -v python3 || command -v python)"
+  "$PY" "$(dirname "$0")/baseline-report.py" "$OUT_DIR"
+  echo "Baseline report ready in $OUT_DIR/"
+  exit 0
+fi
+
+# --- NVD database strategy -------------------------------------------------
+# NIST throttles GitHub-hosted runner IPs *very* heavily, so a live full NVD
+# sync inside CI is unreliable (observed ~11 min per 10k of 361k records = hours).
+# The professional answer is the same one enterprises use: don't hit NIST from
+# CI - mirror the database. We build the NVD DB once on an un-throttled host and
+# pre-seed it into CI, then run with --noupdate.
+#
+#   DISABLE_NVD_UPDATE=true  -> use the pre-seeded DB, no NIST calls (CI default)
+#   (unset) + NVD_API_KEY    -> live update (fine on a normal/residential IP)
 NVD_ARG=()
-if [[ -n "${NVD_API_KEY:-}" ]]; then
-  NVD_ARG=(--nvdApiKey "$NVD_API_KEY")
+if [[ "${DISABLE_NVD_UPDATE:-}" == "true" ]]; then
+  echo "NVD live update DISABLED - using pre-seeded NVD database (--noupdate)."
+  NVD_ARG=(--noupdate)
+elif [[ -n "${NVD_API_KEY:-}" ]]; then
+  echo "NVD live update ENABLED with API key."
+  NVD_ARG=(--nvdApiKey "$NVD_API_KEY" "${NVD_TUNING[@]}")
 else
-  echo "WARN: NVD_API_KEY is not set - NVD update will be slow / rate-limited." >&2
+  echo "WARN: NVD_API_KEY not set and update enabled - NVD sync will be slow." >&2
+  NVD_ARG=("${NVD_TUNING[@]}")
+fi
+
+# Optional explicit NVD data directory (where the pre-seeded DB lives).
+DATA_ARG=()
+if [[ -n "${DC_DATA_DIR:-}" ]]; then
+  DATA_ARG=(--data "$DC_DATA_DIR")
 fi
 
 echo "=============================================================="
 echo " SCA scan: $PROJECT"
 echo " scan path : $SCAN_PATH"
 echo " output    : $OUT_DIR/ (HTML, JSON, SARIF)"
+echo " data dir  : ${DC_DATA_DIR:-<default>}"
 echo "=============================================================="
 
-if command -v dependency-check >/dev/null 2>&1; then
+# The Linux launcher in the release zip is 'dependency-check.sh' (NOT
+# 'dependency-check') - detect both so CI uses the cached-data CLI instead of
+# silently falling back to Docker.
+DC_BIN="$(command -v dependency-check 2>/dev/null || command -v dependency-check.sh 2>/dev/null || true)"
+
+if [[ -n "$DC_BIN" ]]; then
   # ----- CI / local-with-CLI mode -----
-  echo "Using Dependency-Check CLI on PATH."
-  dependency-check \
+  echo "Using Dependency-Check CLI: $DC_BIN"
+  "$DC_BIN" \
     --project "$PROJECT" \
     --scan "$SCAN_PATH" \
     --out "$OUT_DIR" \
     "${FORMATS[@]}" \
     "${EXCLUDES[@]}" \
     "${DISABLE_ANALYZERS[@]}" \
-    "${NVD_TUNING[@]}" \
+    "${DATA_ARG[@]}" \
     "${NVD_ARG[@]}"
 else
   # ----- Local Docker fallback (no local Java needed) -----
@@ -114,7 +152,6 @@ else
     "${FORMATS[@]}" \
     --exclude "**/.git/**" --exclude "**/reports/**" --exclude "**/dashboard/**" \
     "${DISABLE_ANALYZERS[@]}" \
-    "${NVD_TUNING[@]}" \
     "${NVD_ARG[@]}"
 fi
 
