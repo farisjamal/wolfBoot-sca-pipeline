@@ -23,7 +23,16 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:        # lets you run it on-demand from the Actions tab
+  workflow_dispatch:        # run on-demand from the Actions tab ("Run workflow")
+    inputs:
+      scan_mode:
+        description: "Scan mode for this run"
+        type: choice
+        default: baseline
+        options:
+          - baseline   # green clean run (NVD mirror pending)
+          - demo       # DEMO FIXTURE: known-vulnerable components -> gate BLOCKS build (red on purpose)
+          - full       # real Dependency-Check scan vs the seeded NVD mirror
 
 # Least-privilege token. security-events:write is only needed so we can upload
 # the SARIF result into the GitHub "Security" tab (code scanning alerts).
@@ -34,12 +43,13 @@ permissions:
 env:
   DC_VERSION: "12.2.2"          # pinned OWASP Dependency-Check release
   GATE_SEVERITIES: "CRITICAL,HIGH"   # policy gate: build fails if any of these are found
-  # SCAN_MODE controls how the CVE scan runs:
-  #   baseline = labeled empty report so the pipeline runs green while the NVD
-  #              database mirror is still being built (see scripts/build-nvd-db.sh).
-  #   full     = real Dependency-Check scan against the seeded NVD DB.
-  # FLIP TO 'full' once the 'nvd-db' release asset (the NVD mirror) is published.
-  SCAN_MODE: "baseline"
+  # SCAN_MODE controls how the CVE scan runs. On push it defaults to baseline; a
+  # manual run can override it via the workflow_dispatch 'scan_mode' input:
+  #   baseline = labeled empty report; green pipeline while the NVD mirror builds.
+  #   demo     = labeled DEMO FIXTURE (real CVEs on OpenSSL 1.0.1 / zlib 1.2.11)
+  #              to prove the gate blocks CRITICAL/HIGH (this run goes red ON PURPOSE).
+  #   full     = real Dependency-Check scan vs the seeded NVD DB (scripts/build-nvd-db.sh).
+  SCAN_MODE: ${{ github.event.inputs.scan_mode || 'baseline' }}
 
 jobs:
   sca-scan:

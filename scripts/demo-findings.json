@@ -1,0 +1,43 @@
+{
+  "_comment": "DEMO FIXTURE. Two deliberately-old, known-vulnerable components with their REAL, publicly documented CVEs (from NVD). This file exists ONLY to demonstrate that the policy gate correctly catches CRITICAL/HIGH findings and blocks the build. It is NOT the output of scanning wolfBoot - wolfBoot itself is clean. The components and CVE IDs/scores are genuine; this is a controlled test fixture, the same way you would inject a known-vulnerable component to prove an SCA gate works.",
+  "components": [
+    {
+      "name": "openssl",
+      "version": "1.0.1g",
+      "note": "Old OpenSSL pinned on purpose - a realistic firmware crypto dependency.",
+      "vulnerabilities": [
+        {
+          "cve": "CVE-2014-0160",
+          "name": "Heartbleed - TLS heartbeat read overrun (information disclosure)",
+          "severity": "HIGH",
+          "cvssv3": 7.5
+        },
+        {
+          "cve": "CVE-2014-0224",
+          "name": "CCS Injection - SSL/TLS MITM via ChangeCipherSpec",
+          "severity": "HIGH",
+          "cvssv3": 7.4
+        },
+        {
+          "cve": "CVE-2016-2107",
+          "name": "Padding oracle in AES-NI CBC MAC check",
+          "severity": "MEDIUM",
+          "cvssv3": 5.9
+        }
+      ]
+    },
+    {
+      "name": "zlib",
+      "version": "1.2.11",
+      "note": "Old zlib pinned on purpose - a realistic firmware compression dependency.",
+      "vulnerabilities": [
+        {
+          "cve": "CVE-2022-37434",
+          "name": "Heap buffer over-read/overflow in inflate() via large gzip header extra field",
+          "severity": "CRITICAL",
+          "cvssv3": 9.8
+        }
+      ]
+    }
+  ]
+}

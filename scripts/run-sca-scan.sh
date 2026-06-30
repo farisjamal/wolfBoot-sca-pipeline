@@ -76,6 +76,8 @@ mkdir -p "$OUT_DIR"
 # --- SCAN_MODE -------------------------------------------------------------
 # baseline : emit a clearly-labeled empty report (NVD mirror not yet seeded) so
 #            the whole pipeline runs green end-to-end without inventing data.
+# demo     : emit a report from a labeled DEMO FIXTURE of known-vulnerable
+#            components (real CVEs) to prove the policy gate blocks CRITICAL/HIGH.
 # full     : run a real Dependency-Check scan (requires a seeded NVD DB).
 SCAN_MODE="${SCAN_MODE:-full}"
 if [[ "$SCAN_MODE" == "baseline" ]]; then
@@ -83,6 +85,13 @@ if [[ "$SCAN_MODE" == "baseline" ]]; then
   PY="$(command -v python3 || command -v python)"
   "$PY" "$(dirname "$0")/baseline-report.py" "$OUT_DIR"
   echo "Baseline report ready in $OUT_DIR/"
+  exit 0
+fi
+if [[ "$SCAN_MODE" == "demo" ]]; then
+  echo "SCAN_MODE=demo - emitting DEMO FIXTURE report (known-vulnerable components, real CVEs)."
+  PY="$(command -v python3 || command -v python)"
+  "$PY" "$(dirname "$0")/demo-report.py" "$(dirname "$0")/demo-findings.json" "$OUT_DIR"
+  echo "Demo report ready in $OUT_DIR/ (expect the policy gate to FAIL the build)."
   exit 0
 fi
 
